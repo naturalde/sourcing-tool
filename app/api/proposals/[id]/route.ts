@@ -13,12 +13,13 @@ const updateProposalSchema = z.object({
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const proposalResult = await query(
       'SELECT * FROM proposals WHERE id = $1',
-      [params.id]
+      [id]
     );
     
     if (proposalResult.rows.length === 0) {
@@ -30,7 +31,7 @@ export async function GET(
     
     const productsResult = await query(
       'SELECT * FROM proposal_products WHERE proposal_id = $1 ORDER BY position ASC',
-      [params.id]
+      [id]
     );
     
     const proposalWithProducts: ProposalWithProducts = {
@@ -50,9 +51,10 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const validated = updateProposalSchema.parse(body);
     
@@ -76,7 +78,7 @@ export async function PUT(
     }
     
     updates.push(`updated_at = NOW()`);
-    values.push(params.id);
+    values.push(id);
     
     const result = await query(
       `UPDATE proposals SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
@@ -110,12 +112,13 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const result = await query(
       'DELETE FROM proposals WHERE id = $1 RETURNING id',
-      [params.id]
+      [id]
     );
     
     if (result.rows.length === 0) {
