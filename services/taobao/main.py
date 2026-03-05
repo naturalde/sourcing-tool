@@ -137,11 +137,25 @@ async def get_product_details(product_id: str):
             if not item:
                 raise HTTPException(status_code=404, detail="Product not found")
             
-            # Debug: Log the fields we're looking for
-            print(f"OneBound API Response - favcount: {item.get('favcount')}")
-            print(f"OneBound API Response - fanscount: {item.get('fanscount')}")
-            print(f"OneBound API Response - created_time: {item.get('created_time')}")
-            print(f"OneBound API Response - rate_grade: {item.get('rate_grade')}")
+            # Debug: Log all available fields to understand the API response structure
+            print(f"\n=== OneBound API Response for {product_id} ===")
+            print(f"Available fields: {list(item.keys())}")
+            print(f"favcount: {item.get('favcount')}")
+            print(f"fanscount: {item.get('fanscount')}")
+            print(f"created_time: {item.get('created_time')}")
+            print(f"rate_grade: {item.get('rate_grade')}")
+            print(f"volume: {item.get('volume')}")
+            print(f"sellCount: {item.get('sellCount')}")
+            print(f"sales: {item.get('sales')}")
+            
+            # Check for alternative field names
+            print(f"collect_count: {item.get('collect_count')}")
+            print(f"favs: {item.get('favs')}")
+            print(f"favorites: {item.get('favorites')}")
+            print(f"fans: {item.get('fans')}")
+            print(f"shop_fans: {item.get('shop_fans')}")
+            print(f"seller_info: {item.get('seller_info')}")
+            print("=" * 50)
             
             # Build detailed response with requested fields
             details = {

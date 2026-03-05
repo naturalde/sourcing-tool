@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Calendar, DollarSign, Trash2, Edit, Download, FileText, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ArrowLeft, Calendar, DollarSign, Trash2, Edit, Download, FileText, ChevronDown, ChevronUp, Loader2, Upload, CheckCircle2, Package } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,8 @@ import {
 import { ProductDTO } from "@/types/product";
 import { formatCurrency } from "@/lib/utils";
 import { ImageCarouselModal } from "@/components/ui/image-carousel-modal";
+import { TemplateManagerDialog } from "@/components/proposals/template-manager-dialog";
+import { templateManager, PPTXTemplate } from "@/lib/template-manager";
 
 interface Proposal {
   id: string;
@@ -79,10 +81,112 @@ export default function ProposalDetailPage() {
   const [carouselInitialIndex, setCarouselInitialIndex] = useState(0);
   const [isCarouselOpen, setIsCarouselOpen] = useState(false);
   const [loadingAIEnrich, setLoadingAIEnrich] = useState<string | null>(null);
+  const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<PPTXTemplate | null>(null);
+  const [isExportingPPTX, setIsExportingPPTX] = useState(false);
+
+  // Fetch product details with retry logic
+  const fetchProductDetailsWithRetry = async (productId: string, platform: string, maxRetries = 3): Promise<ProductDetails | null> => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(`/api/product-details?productId=${productId}&platform=${platform}`);
+        
+        if (!response.ok) {
+          if (attempt < maxRetries) {
+            console.log(`Attempt ${attempt} failed for ${productId}, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+            continue;
+          }
+          throw new Error(`Failed to fetch details after ${maxRetries} attempts`);
+        }
+
+        const details = await response.json();
+        return details;
+      } catch (error) {
+        if (attempt === maxRetries) {
+          console.error(`Error fetching product details for ${productId} after ${maxRetries} attempts:`, error);
+          return null;
+        }
+      }
+    }
+    return null;
+  };
+
+  // Fetch all product details on load
+  const fetchAllProductDetails = async () => {
+    if (!proposal) return;
+
+    const detailsToFetch: Array<{ productId: string; product: ProductDTO }> = [];
+    
+    // Identify products that need details
+    proposal.products.forEach(product => {
+      const productId = product.source_id;
+      
+      // Skip if already in memory
+      if (productDetails.has(productId)) {
+        return;
+      }
+      
+      // Skip if has cached details
+      if (product.cachedDetails) {
+        const newDetails = new Map(productDetails);
+        newDetails.set(productId, product.cachedDetails);
+        setProductDetails(newDetails);
+        return;
+      }
+      
+      detailsToFetch.push({ productId, product });
+    });
+
+    if (detailsToFetch.length === 0) return;
+
+    console.log(`Fetching details for ${detailsToFetch.length} products...`);
+    
+    // Mark all as loading
+    const newLoading = new Set(loadingDetails);
+    detailsToFetch.forEach(({ productId }) => newLoading.add(productId));
+    setLoadingDetails(newLoading);
+
+    // Fetch all details in parallel
+    const results = await Promise.all(
+      detailsToFetch.map(async ({ productId, product }) => {
+        const details = await fetchProductDetailsWithRetry(productId, product.source);
+        return { productId, details };
+      })
+    );
+
+    // Update state with all fetched details
+    const newDetails = new Map(productDetails);
+    results.forEach(({ productId, details }) => {
+      if (details) {
+        newDetails.set(productId, details);
+      }
+    });
+    setProductDetails(newDetails);
+
+    // Save to localStorage for caching
+    if (proposal) {
+      const cachedDetailsKey = `proposal_details_${proposal.id}`;
+      const detailsObj = Object.fromEntries(newDetails);
+      localStorage.setItem(cachedDetailsKey, JSON.stringify(detailsObj));
+    }
+
+    // Clear loading state
+    setLoadingDetails(new Set());
+    
+    console.log(`Successfully fetched details for ${results.filter(r => r.details).length}/${detailsToFetch.length} products`);
+  };
 
   useEffect(() => {
     loadProposal();
   }, [params.id]);
+
+  // Fetch details for all products on load
+  useEffect(() => {
+    if (proposal && proposal.products.length > 0) {
+      fetchAllProductDetails();
+    }
+  }, [proposal?.id]);
 
   const loadProposal = () => {
     try {
@@ -96,6 +200,18 @@ export default function ProposalDetailPage() {
           setEditedClientName(found.client_name || "");
           setEditedNotes(found.notes || "");
           setEditedStatus(found.status);
+          
+          // Load cached product details from localStorage
+          const cachedDetailsKey = `proposal_details_${found.id}`;
+          const cachedDetailsStr = localStorage.getItem(cachedDetailsKey);
+          if (cachedDetailsStr) {
+            try {
+              const cachedDetailsObj = JSON.parse(cachedDetailsStr);
+              setProductDetails(new Map(Object.entries(cachedDetailsObj)));
+            } catch (e) {
+              console.error('Error loading cached details:', e);
+            }
+          }
         } else {
           setProposal(null);
         }
@@ -194,9 +310,10 @@ export default function ProposalDetailPage() {
     }
   };
 
-  const handleExportPPTX = async () => {
+  const handleExportPPTX = async (templateId?: string) => {
     if (!proposal) return;
 
+    setIsExportingPPTX(true);
     try {
       const response = await fetch('/api/export/pptx', {
         method: 'POST',
@@ -206,6 +323,7 @@ export default function ProposalDetailPage() {
         body: JSON.stringify({
           proposal,
           orientation: 'landscape',
+          templateId: templateId || 'default',
         }),
       });
 
@@ -224,7 +342,21 @@ export default function ProposalDetailPage() {
       document.body.removeChild(a);
     } catch (error) {
       console.error('Error exporting PPTX:', error);
-      alert('Failed to export PPTX. This feature is coming soon!');
+      alert('Failed to export PPTX');
+    } finally {
+      setIsExportingPPTX(false);
+    }
+  };
+
+  const handleExportWithTemplate = () => {
+    const templates = [templateManager.getDefaultTemplate(), ...templateManager.getTemplates()];
+    
+    if (templates.length === 1) {
+      // Only default template, export directly
+      handleExportPPTX('default');
+    } else {
+      // Show template selection
+      setSelectedTemplate(null);
     }
   };
 
@@ -566,19 +698,45 @@ export default function ProposalDetailPage() {
                         variant="outline"
                         size="sm"
                         className="border-sky-300 text-sky-600 hover:bg-sky-50"
+                        disabled={isExportingPPTX}
                       >
-                        <Download className="h-4 w-4 mr-1" />
-                        Export
+                        {isExportingPPTX ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            Exporting...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="h-4 w-4 mr-1" />
+                            Export
+                          </>
+                        )}
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent align="end" className="w-56">
                       <DropdownMenuItem onClick={handleExportPDF}>
                         <FileText className="h-4 w-4 mr-2" />
                         Export as PDF
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={handleExportPPTX}>
+                      <DropdownMenuItem onClick={() => handleExportPPTX('default')}>
                         <FileText className="h-4 w-4 mr-2" />
-                        Export as PPTX
+                        Export PPTX (Default Template)
+                      </DropdownMenuItem>
+                      {templateManager.getTemplates().map((template) => (
+                        <DropdownMenuItem
+                          key={template.id}
+                          onClick={() => handleExportPPTX(template.id)}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          Export PPTX ({template.name})
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuItem
+                        onClick={() => setIsTemplateDialogOpen(true)}
+                        className="border-t mt-1 pt-2"
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Manage Templates
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -628,6 +786,29 @@ export default function ProposalDetailPage() {
               <p className="text-lg font-semibold text-sky-600">
                 {formatCurrency(totalValue, proposal.currency)}
               </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600 mb-1">Details Status</p>
+              {(() => {
+                const productsWithDetails = proposal.products.filter(p => p.cachedDetails);
+                const allHaveDetails = productsWithDetails.length === proposal.products.length;
+                return allHaveDetails ? (
+                  <div className="flex items-center text-green-600">
+                    <CheckCircle2 className="h-4 w-4 mr-2" />
+                    <span className="text-sm font-medium">All loaded</span>
+                  </div>
+                ) : productsWithDetails.length > 0 ? (
+                  <div className="flex items-center text-amber-600">
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <span className="text-sm font-medium">{productsWithDetails.length}/{proposal.products.length} loaded</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center text-gray-500">
+                    <Loader2 className="h-4 w-4 mr-2" />
+                    <span className="text-sm font-medium">None loaded</span>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -1007,6 +1188,11 @@ export default function ProposalDetailPage() {
         initialIndex={carouselInitialIndex}
         isOpen={isCarouselOpen}
         onClose={() => setIsCarouselOpen(false)}
+      />
+      
+      <TemplateManagerDialog
+        open={isTemplateDialogOpen}
+        onOpenChange={setIsTemplateDialogOpen}
       />
     </div>
   );

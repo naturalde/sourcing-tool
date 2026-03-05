@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Plus, FileText, Calendar, DollarSign, Trash2, Eye, ShoppingCart, ArrowLeft } from "lucide-react";
+import { Plus, FileText, Calendar, DollarSign, Trash2, Eye, ShoppingCart, ArrowLeft, Package, CheckCircle2, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ interface Proposal {
   updated_at: string;
   totalItems?: number;
   totalValue?: number;
+  products?: ProductDTO[];
 }
 
 export default function ProposalsPage() {
@@ -373,7 +374,7 @@ export default function ProposalsPage() {
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {[
             { label: "Total Proposals", value: proposals.length, icon: FileText },
             {
@@ -468,9 +469,37 @@ export default function ProposalsPage() {
                         {new Date(proposal.created_at).toLocaleDateString()}
                       </div>
                       <div className="flex items-center text-sm text-gray-600">
-                        <DollarSign className="h-4 w-4 mr-2" />
-                        {proposal.currency}
+                        <Package className="h-4 w-4 mr-2" />
+                        {proposal.totalItems || proposal.products?.length || 0} items
                       </div>
+                      <div className="flex items-center text-sm text-gray-600">
+                        <DollarSign className="h-4 w-4 mr-2" />
+                        {proposal.totalValue ? formatCurrency(proposal.totalValue, proposal.currency) : proposal.currency}
+                      </div>
+                      {proposal.products && proposal.products.length > 0 && (
+                        <div className="flex items-center text-sm">
+                          {(() => {
+                            const productsWithDetails = proposal.products.filter(p => p.cachedDetails);
+                            const allHaveDetails = productsWithDetails.length === proposal.products.length;
+                            return allHaveDetails ? (
+                              <div className="flex items-center text-green-600">
+                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                                All details loaded
+                              </div>
+                            ) : productsWithDetails.length > 0 ? (
+                              <div className="flex items-center text-amber-600">
+                                <Loader2 className="h-4 w-4 mr-2" />
+                                {productsWithDetails.length}/{proposal.products.length} details loaded
+                              </div>
+                            ) : (
+                              <div className="flex items-center text-gray-500">
+                                <Loader2 className="h-4 w-4 mr-2" />
+                                No details loaded
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex gap-2">

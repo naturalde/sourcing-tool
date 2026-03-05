@@ -5,9 +5,10 @@ import { motion } from "framer-motion";
 import { SearchBar } from "@/components/search/search-bar";
 import { PlatformSelector } from "@/components/search/platform-selector";
 import { ProductTable } from "@/components/products/product-table";
+import { ProductCardView } from "@/components/products/product-card-view";
 import { PriceFilter } from "@/components/filters/price-filter";
 import { Platform, ProductDTO } from "@/types/product";
-import { Loader2, Package, ShoppingCart, Download, FileJson, FileSpreadsheet, SlidersHorizontal } from "lucide-react";
+import { Loader2, Package, ShoppingCart, Download, FileJson, FileSpreadsheet, SlidersHorizontal, LayoutGrid, List } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { 
   DropdownMenu,
@@ -47,6 +48,8 @@ export default function Home() {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [priceFilter, setPriceFilter] = useState<{ min: number; max: number } | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
+  const [isDedupe, setIsDedupe] = useState(true);
 
   // Load proposal products from localStorage on mount
   useEffect(() => {
@@ -87,9 +90,9 @@ export default function Home() {
       return;
     }
     
-    // Fetch details for the product
+    // Fetch details for the product using source_id
     try {
-      const response = await fetch(`/api/product-details?productId=${product.id}&platform=${product.source}`);
+      const response = await fetch(`/api/product-details?productId=${product.source_id}&platform=${product.source}`);
       if (response.ok) {
         const details = await response.json();
         const productWithDetails = {
@@ -103,7 +106,7 @@ export default function Home() {
         setProposalProducts([...proposalProducts, product]);
       }
     } catch (error) {
-      console.error(`Failed to fetch details for ${product.id}:`, error);
+      console.error(`Failed to fetch details for ${product.source_id}:`, error);
       // Add without details if fetch fails
       setProposalProducts([...proposalProducts, product]);
     }
@@ -122,7 +125,7 @@ export default function Home() {
     const productsWithDetails = await Promise.all(
       productsToAdd.map(async (product) => {
         try {
-          const response = await fetch(`/api/product-details?productId=${product.id}&platform=${product.source}`);
+          const response = await fetch(`/api/product-details?productId=${product.source_id}&platform=${product.source}`);
           if (response.ok) {
             const details = await response.json();
             // Store details with the product
@@ -133,7 +136,7 @@ export default function Home() {
             };
           }
         } catch (error) {
-          console.error(`Failed to fetch details for ${product.id}:`, error);
+          console.error(`Failed to fetch details for ${product.source_id}:`, error);
         }
         // Return product without details if fetch fails
         return product;
@@ -156,15 +159,68 @@ export default function Home() {
     };
   }, [searchResults]);
 
-  // Filter products by price range
+  // Filter products by price range, dedupe, and sort by price
   const filteredProducts = useMemo(() => {
-    if (!priceFilter) return searchResults;
+    let products = priceFilter 
+      ? searchResults.filter(product => 
+          product.price.current >= priceFilter.min && 
+          product.price.current <= priceFilter.max
+        )
+      : searchResults;
     
-    return searchResults.filter(product => 
-      product.price.current >= priceFilter.min && 
-      product.price.current <= priceFilter.max
-    );
-  }, [searchResults, priceFilter]);
+    // Deduplicate by title OR image if enabled
+    if (isDedupe) {
+      const seenTitles = new Map<string, ProductDTO>();
+      const seenImages = new Map<string, ProductDTO>();
+      const uniqueProducts = new Map<string, ProductDTO>();
+      
+      products.forEach(product => {
+        const normalizedTitle = product.title.toLowerCase().trim();
+        const primaryImage = product.image_urls?.[0] || '';
+        const normalizedImage = primaryImage.replace(/^https?:/, '').replace(/^\/\//, '');
+        
+        let isDuplicate = false;
+        
+        // Check if title already seen
+        if (normalizedTitle && seenTitles.has(normalizedTitle)) {
+          const existing = seenTitles.get(normalizedTitle)!;
+          if (product.price.current < existing.price.current) {
+            // Replace with cheaper version
+            uniqueProducts.delete(existing.id);
+            seenTitles.set(normalizedTitle, product);
+            if (normalizedImage) seenImages.set(normalizedImage, product);
+            uniqueProducts.set(product.id, product);
+          }
+          isDuplicate = true;
+        }
+        
+        // Check if image already seen
+        if (normalizedImage && seenImages.has(normalizedImage)) {
+          const existing = seenImages.get(normalizedImage)!;
+          if (product.price.current < existing.price.current) {
+            // Replace with cheaper version
+            uniqueProducts.delete(existing.id);
+            if (normalizedTitle) seenTitles.set(normalizedTitle, product);
+            seenImages.set(normalizedImage, product);
+            uniqueProducts.set(product.id, product);
+          }
+          isDuplicate = true;
+        }
+        
+        // If not a duplicate, add it
+        if (!isDuplicate) {
+          if (normalizedTitle) seenTitles.set(normalizedTitle, product);
+          if (normalizedImage) seenImages.set(normalizedImage, product);
+          uniqueProducts.set(product.id, product);
+        }
+      });
+      
+      products = Array.from(uniqueProducts.values());
+    }
+    
+    // Sort by price (ascending) by default
+    return [...products].sort((a, b) => a.price.current - b.price.current);
+  }, [searchResults, priceFilter, isDedupe]);
 
   const handlePriceFilterChange = (min: number, max: number) => {
     setPriceFilter({ min, max });
@@ -320,20 +376,18 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       <div className="container mx-auto px-4 pt-24 pb-12">
-        <div className="max-w-5xl mx-auto">
-          <div className="mb-8 mt-12">
-            <h1 className="text-3xl font-bold text-gray-900">
-              Sourcing Assistant
-            </h1>
-          </div>
-          
-          <div className="space-y-8 mb-12">
-            <SearchBar 
-              onSearch={handleSearch} 
-              onImageSearch={handleImageSearch}
-              isLoading={isLoading} 
-            />
-          </div>
+        <div className="mb-8 mt-12 max-w-5xl mx-auto">
+          <h1 className="text-3xl font-bold text-gray-900">
+            Sourcing Assistant
+          </h1>
+        </div>
+        
+        <div className="space-y-8 mb-12 max-w-5xl mx-auto">
+          <SearchBar 
+            onSearch={handleSearch} 
+            onImageSearch={handleImageSearch}
+            isLoading={isLoading} 
+          />
         </div>
 
         <div className="max-w-5xl mx-auto">
@@ -356,19 +410,43 @@ export default function Home() {
                   </p>
                   
                   {selectedProducts.size > 0 && (
-                    <p className="text-gray-600">
+                    <p className="text-gray-700 font-medium">
                       • {selectedProducts.size} {selectedProducts.size === 1 ? 'item' : 'items'} selected
                     </p>
                   )}
                   
                   {proposalProducts.length > 0 && (
-                    <p className="text-gray-600">
+                    <p className="text-gray-700 font-medium">
                       • {proposalProducts.length} items in proposal
                     </p>
                   )}
                 </div>
 
                 <div className="flex items-center gap-3">
+                  {/* View Mode Toggle */}
+                  <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setViewMode('table')}
+                      className={`rounded-none border-0 ${
+                        viewMode === 'table' ? 'bg-sky-100 text-sky-700' : 'text-gray-600'
+                      }`}
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setViewMode('card')}
+                      className={`rounded-none border-0 ${
+                        viewMode === 'card' ? 'bg-sky-100 text-sky-700' : 'text-gray-600'
+                      }`}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -442,7 +520,7 @@ export default function Home() {
                         className="bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ShoppingCart className="h-4 w-4 mr-2" />
-                        Add Selected to Proposal
+                        Add Selected
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56">
@@ -483,7 +561,7 @@ export default function Home() {
                 animate={{
                   height: isFilterOpen ? "auto" : 0,
                   opacity: isFilterOpen ? 1 : 0,
-                  marginBottom: isFilterOpen ? 24 : 0,
+                  marginBottom: isFilterOpen ? 16 : 0,
                 }}
                 transition={{
                   duration: 0.3,
@@ -491,18 +569,40 @@ export default function Home() {
                 }}
                 className="overflow-hidden"
               >
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                  <div className="space-y-6">
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Platform</h3>
-                      <PlatformSelector
-                        selectedPlatforms={selectedPlatforms}
-                        onPlatformsChange={setSelectedPlatforms}
-                      />
+                <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                  <div className="space-y-4">
+                    {/* Platform and Remove Duplicates on same row */}
+                    <div className="flex gap-6 items-start">
+                      <div className="flex-1">
+                        <h3 className="text-xs font-semibold text-gray-900 mb-2">Platform</h3>
+                        <PlatformSelector
+                          selectedPlatforms={selectedPlatforms}
+                          onPlatformsChange={setSelectedPlatforms}
+                        />
+                      </div>
+                      
+                      <div className="flex-shrink-0 pt-6">
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <h3 className="text-xs font-semibold text-gray-900">Remove Duplicates</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">Keep lowest price</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isDedupe}
+                              onChange={(e) => setIsDedupe(e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-sky-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-600"></div>
+                          </label>
+                        </div>
+                      </div>
                     </div>
                     
-                    <div className="border-t pt-6">
-                      <h3 className="text-sm font-semibold text-gray-900 mb-4">Price Range</h3>
+                    {/* Price Range on its own row */}
+                    <div className="border-t pt-4">
+                      <h3 className="text-xs font-semibold text-gray-900 mb-2">Price Range</h3>
                       <div className="max-w-sm">
                         <PriceFilter
                           minPrice={priceRange.min}
@@ -516,12 +616,21 @@ export default function Home() {
                 </div>
               </motion.div>
 
-              <ProductTable 
-                products={filteredProducts} 
-                onAddToProposal={handleAddToProposal}
-                selectedProducts={selectedProducts}
-                setSelectedProducts={setSelectedProducts}
-              />
+              {viewMode === 'table' ? (
+                <ProductTable 
+                  products={filteredProducts} 
+                  onAddToProposal={handleAddToProposal}
+                  selectedProducts={selectedProducts}
+                  setSelectedProducts={setSelectedProducts}
+                />
+              ) : (
+                <ProductCardView
+                  products={filteredProducts}
+                  onAddToProposal={handleAddToProposal}
+                  selectedProducts={selectedProducts}
+                  setSelectedProducts={setSelectedProducts}
+                />
+              )}
             </>
           ) : (
             <>

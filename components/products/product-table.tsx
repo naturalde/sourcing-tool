@@ -88,6 +88,12 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept keyboard events when user is typing in input fields
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
       if (!tableRef.current?.contains(document.activeElement) && focusedRowIndex === -1) {
         return;
       }
@@ -111,7 +117,13 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
           e.preventDefault();
           if (focusedRowIndex >= 0 && focusedRowIndex < sortedProducts.length) {
             const product = sortedProducts[focusedRowIndex];
-            toggleProduct(product.id);
+            const newSelected = new Set(activeSelectedProducts);
+            if (newSelected.has(product.id)) {
+              newSelected.delete(product.id);
+            } else {
+              newSelected.add(product.id);
+            }
+            setActiveSelectedProducts(newSelected);
           }
           break;
       }
@@ -119,7 +131,7 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [focusedRowIndex, sortedProducts]);
+  }, [focusedRowIndex, sortedProducts, activeSelectedProducts, setActiveSelectedProducts]);
 
   // Focus table on mount to enable keyboard navigation
   useEffect(() => {

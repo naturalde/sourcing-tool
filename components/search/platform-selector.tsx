@@ -33,7 +33,7 @@ export function PlatformSelector({
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className="w-full max-w-5xl mx-auto">
       <div className="flex flex-wrap gap-3">
         {platforms.map((platform, index) => {
           const isSelected = selectedPlatforms.includes(platform.id);
