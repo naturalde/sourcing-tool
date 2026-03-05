@@ -5,9 +5,11 @@ This guide covers deploying the Sourcing Assistant application with separate fro
 ## Architecture
 
 - **Frontend (Next.js)**: Deployed on Vercel
+  - Uses localStorage for proposal data
+  - No database required
 - **Backend (Python FastAPI)**: Deployed on Railway/Render
-- **Database**: PostgreSQL (Vercel Postgres or external)
-- **Cache**: Redis (Railway/Render built-in)
+  - Taobao service for product search
+  - Uses Redis for caching (built-in on Railway/Render)
 
 ---
 

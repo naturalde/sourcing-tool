@@ -60,6 +60,7 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
   const setActiveSelectedProducts = setSelectedProducts ?? setInternalSelectedProducts;
 
   const tableRef = useRef<HTMLDivElement>(null);
+  const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
   // Sort products based on price or name
   const sortedProducts = useMemo(() => {
@@ -126,6 +127,20 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
       tableRef.current.focus();
     }
   }, [products]);
+
+  // Auto-scroll focused row into view
+  useEffect(() => {
+    if (focusedRowIndex >= 0 && focusedRowIndex < sortedProducts.length) {
+      const rowElement = rowRefs.current.get(focusedRowIndex);
+      if (rowElement) {
+        rowElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      }
+    }
+  }, [focusedRowIndex, sortedProducts.length]);
 
   const togglePriceSort = () => {
     setNameSortOrder(null); // Clear name sort when sorting by price
@@ -267,7 +282,14 @@ export function ProductTable({ products, onAddToProposal, selectedProducts, setS
               return (
                 <React.Fragment key={product.id}>
                   <tr 
-                    key={product.id} 
+                    key={product.id}
+                    ref={(el) => {
+                      if (el) {
+                        rowRefs.current.set(index, el);
+                      } else {
+                        rowRefs.current.delete(index);
+                      }
+                    }}
                     className={`transition-colors ${
                       isFocused 
                         ? 'bg-sky-50 ring-2 ring-inset ring-sky-400' 

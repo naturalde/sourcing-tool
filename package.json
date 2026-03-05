@@ -6,11 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:build": "docker-compose build",
-    "docker:logs": "docker-compose logs -f"
+    "lint": "eslint"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.2",
@@ -24,12 +20,10 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.0.6",
     "framer-motion": "^11.11.17",
-    "ioredis": "^5.3.2",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.468.0",
     "next": "16.1.6",
-    "pg": "^8.11.3",
     "pptxgenjs": "^4.0.1",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
@@ -43,7 +37,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/pg": "^8.10.9",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",

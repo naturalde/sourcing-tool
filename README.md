@@ -13,8 +13,8 @@ A modern sourcing assistant web application that enables sourcing agents to sear
 
 ## 📋 Documentation
 
-- **[PRD.md](./PRD.md)** - Complete Product Requirements Document
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Technical Architecture Documentation
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Backend deployment guide (Railway/Render)
+- **[CODEBASE_AUDIT.md](./CODEBASE_AUDIT.md)** - Code quality audit and improvement recommendations
 
 ## 🏗️ Architecture
 
@@ -29,10 +29,11 @@ OneBound API (Taobao Integration)
 ```
 
 **Tech Stack:**
-- **Frontend**: Next.js 15, TypeScript, Tailwind CSS v4, shadcn/ui, Framer Motion
-- **Backend**: Python 3.11+ FastAPI microservice
-- **Database**: PostgreSQL (optional), Redis (optional)
-- **APIs**: OneBound Taobao API, ScrapingBee (fallback)
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, Framer Motion
+- **Storage**: Browser localStorage (no database required)
+- **Backend**: Python 3.11+ FastAPI microservice (Taobao service)
+- **Cache**: Redis (backend only, optional)
+- **APIs**: OneBound (Taobao), Gemini AI (product enrichment)
 
 ## 🚀 Quick Start
 
@@ -57,13 +58,16 @@ Copy the example environment file and configure your API keys:
 cp .env.example .env
 ```
 
-Edit `.env` and add your OneBound API credentials:
+Edit `.env` and add your API keys:
 ```env
+TAOBAO_SERVICE_URL=http://localhost:8001
 ONEBOUND_API_KEY=your_api_key_here
-ONEBOUND_API_SECRET=your_api_secret_here
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-Get your API credentials from [OneBound](https://open.onebound.cn/)
+Get your API credentials:
+- OneBound: [https://open.onebound.cn/](https://open.onebound.cn/)
+- Gemini: [https://makersuite.google.com/app/apikey](https://makersuite.google.com/app/apikey)
 
 ### 3. Start the Taobao Service
 
@@ -133,8 +137,8 @@ sourcing-assistant/
 │   └── ui/                 # shadcn/ui components
 ├── lib/                     # Shared utilities
 │   ├── utils.ts            # Utility functions
-│   ├── db.ts               # PostgreSQL client (optional)
-│   └── redis.ts            # Redis client (optional)
+│   ├── api-client.ts       # API client wrapper
+│   └── export.ts           # Export utilities (PDF/PPTX/CSV/JSON)
 ├── types/                   # TypeScript type definitions
 │   └── product.ts          # Product DTOs
 ├── services/                # Python microservices
@@ -142,8 +146,8 @@ sourcing-assistant/
 │       ├── main.py         # FastAPI service
 │       └── requirements.txt
 ├── public/logos/           # Platform logos
-├── schema.sql              # Database schema
-├── PRD.md                  # Product Requirements Document
+├── DEPLOYMENT.md           # Deployment guide
+├── CODEBASE_AUDIT.md       # Code quality audit
 └── .env                    # Environment variables
 ```
 
@@ -154,29 +158,28 @@ sourcing-assistant/
   - Body: `{ query, platforms, page, limit }`
   - Returns: `{ products, pagination, metadata }`
 
-### Proposals (Database required)
-- `GET /api/proposals` - List proposals
-- `POST /api/proposals` - Create proposal
-- `GET /api/proposals/:id` - Get proposal details
-- `PUT /api/proposals/:id` - Update proposal
-- `DELETE /api/proposals/:id` - Delete proposal
+### AI Enrichment
+- `POST /api/ai-enrich` - Generate alternative product designs with Gemini AI
+  - Body: `{ imageUrl, userNotes }`
+  - Returns: `{ original_product, design_alternatives }`
+
+### Export
+- `POST /api/export/pdf` - Export proposal as PDF
+- `POST /api/export/pptx` - Export proposal as PowerPoint
 
 ### Taobao Service
 - `http://localhost:8001/docs` - Interactive API documentation
 - `POST /search` - Search Taobao products
 - `GET /health` - Health check endpoint
 
-## 🗄️ Database Schema
+## 💾 Data Storage
 
-The application uses PostgreSQL with the following main tables:
-- `proposals` - Sourcing proposals
-- `proposal_products` - Products in proposals (JSONB)
-- `searches` - Search history
-- `exports` - Export records
+The application uses **browser localStorage** for all data persistence:
+- Proposals and products are stored client-side
+- No database setup required
+- Data persists across browser sessions
 
-See [schema.sql](./schema.sql) for complete schema.
-
-## � Platform Integration
+## 🌐 Platform Integration
 
 ### Taobao ✅
 - **API**: OneBound Taobao API
@@ -200,39 +203,37 @@ See [schema.sql](./schema.sql) for complete schema.
 - API keys stored in environment variables (`.env`)
 - Input validation with Zod schemas
 - CORS configured for microservices
-- Optional database and Redis (graceful degradation)
+- Client-side data storage (localStorage)
+
+**⚠️ See [CODEBASE_AUDIT.md](./CODEBASE_AUDIT.md) for security improvements needed**
 
 ## 📈 Performance
 
-- Optional Redis caching for API responses
-- 60-second timeout for web scraping requests
-- Optimized image loading with Next.js Image
-- Efficient React Server Components
+- 60-second timeout for API requests
+- React 19 with compiler optimization enabled
+- Efficient component rendering
+- Session storage for search results caching
 
-## ✨ Current Features
+**⚠️ See [CODEBASE_AUDIT.md](./CODEBASE_AUDIT.md) for performance optimization recommendations**
+
+## ✨ Features
 
 ### Completed ✅
-- Beautiful light-mode enterprise UI
-- Pill-shaped animated navigation
-- Taobao product search via OneBound API
-- Real-time debug window for API inspection
-- Product table with multi-select checkboxes
-- City/location display for products
-- Platform badges and icons
-- Responsive design
-- Error handling and graceful degradation
-
-### In Progress 🚧
-- Proposal management system
-- Database integration (PostgreSQL)
-- Export functionality (PDF, Excel)
+- **Search**: Taobao product search via OneBound API
+- **UI**: Modern light-mode design with responsive layout
+- **Proposals**: Create and manage sourcing proposals (localStorage)
+- **Export**: PDF and PowerPoint export with product images
+- **AI Enrichment**: Generate alternative product designs with Gemini AI
+- **Product Details**: Fetch detailed product information on demand
+- **Multi-select**: Checkbox selection for adding products to proposals
+- **Filtering**: Price range and MOQ filtering
 
 ### Planned 📋
 - Additional platforms (1688, Temu, Amazon)
-- Advanced filtering and sorting
-- Price comparison charts
-- User authentication
-- Client portal
+- Testing framework (Jest + Playwright)
+- Enhanced security (rate limiting, input validation)
+- Component refactoring (split large files)
+- Performance optimization (React.memo, code splitting)
 
 ## 🤝 Contributing
 
@@ -280,6 +281,8 @@ python3 -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 
 - [Next.js Documentation](https://nextjs.org/docs)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
-- [Redis Documentation](https://redis.io/docs/)
+- [OneBound API](https://open.onebound.cn/)
+- [Gemini AI](https://ai.google.dev/)
+- [Deployment Guide](./DEPLOYMENT.md)
+- [Code Quality Audit](./CODEBASE_AUDIT.md)
 - [Docker Documentation](https://docs.docker.com/)

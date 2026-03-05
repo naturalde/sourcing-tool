@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { cache } from '@/lib/redis';
-import { query } from '@/lib/db';
 import { SearchRequest, SearchResponse, Platform } from '@/types/product';
 
 const searchSchema = z.object({
@@ -19,9 +17,9 @@ const searchSchema = z.object({
 
 const SERVICE_URLS: Record<Platform, string> = {
   taobao: process.env.TAOBAO_SERVICE_URL || 'http://localhost:8001',
-  '1688': process.env.SERVICE_1688_URL || 'http://localhost:8002',
-  temu: process.env.TEMU_SERVICE_URL || 'http://localhost:8003',
-  amazon: process.env.AMAZON_SERVICE_URL || 'http://localhost:8004',
+  '1688': 'http://localhost:8002', // Not implemented yet
+  temu: 'http://localhost:8003', // Not implemented yet
+  amazon: 'http://localhost:8004', // Not implemented yet
 };
 
 export async function POST(request: NextRequest) {
@@ -30,13 +28,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const validated = searchSchema.parse(body);
-    
-    const cacheKey = `search:${JSON.stringify(validated)}`;
-    const cached = await cache.get<SearchResponse>(cacheKey);
-    
-    if (cached) {
-      return NextResponse.json(cached);
-    }
     
     const promises = validated.platforms.map(async (platform) => {
       try {
@@ -53,7 +44,15 @@ export async function POST(request: NextRequest) {
         });
         
         if (!response.ok) {
-          throw new Error(`${platform} service returned ${response.status}`);
+          const errorData = await response.json().catch(() => ({}));
+          const errorMessage = errorData.detail || `${platform} service returned ${response.status}`;
+          
+          // Check for quota exceeded error
+          if (errorMessage.includes('已超量') || errorMessage.includes('quota') || errorMessage.includes('exceeded')) {
+            throw new Error(`API quota exceeded. Please check your OneBound API key or upgrade your plan.`);
+          }
+          
+          throw new Error(errorMessage);
         }
         
         const data = await response.json();
@@ -89,16 +88,6 @@ export async function POST(request: NextRequest) {
         platformErrors: Object.keys(errors).length > 0 ? errors : undefined,
       },
     };
-    
-    await cache.set(cacheKey, response, 3600);
-    
-    // Log search to database (optional - silently fail if DB not available)
-    query(
-      'INSERT INTO searches (query, platforms, filters, result_count) VALUES ($1, $2, $3, $4)',
-      [validated.query, validated.platforms, validated.filters || {}, allProducts.length]
-    ).catch(() => {
-      // Database logging is optional
-    });
     
     return NextResponse.json(response);
   } catch (error) {
