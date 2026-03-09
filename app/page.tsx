@@ -175,11 +175,17 @@ export default function Home() {
     setIsAddingToProposal(true);
     
     try {
-      const selected = searchResults.filter(p => selectedProducts.has(p.id));
+      // Gather selected products from ALL tabs, not just the active one
+      const allProducts: ProductDTO[] = [];
+      searchTabs.forEach(tab => {
+        const tabSelectedProducts = tab.products.filter(p => selectedProducts.has(p.id));
+        allProducts.push(...tabSelectedProducts);
+      });
+      
       const newProposalProducts = [...proposalProducts];
       
       // Fetch details for selected products that aren't already in proposal
-      const productsToAdd = selected.filter(
+      const productsToAdd = allProducts.filter(
         product => !newProposalProducts.some(p => p.id === product.id)
       );
       
