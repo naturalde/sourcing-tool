@@ -638,7 +638,7 @@ export default function ProposalDetailPage() {
           <Button
             variant="outline"
             onClick={() => router.push('/proposals')}
-            className="mb-4"
+            className="mb-4 rounded-full"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Proposals
@@ -729,19 +729,14 @@ export default function ProposalDetailPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="border-sky-300 text-sky-600 hover:bg-sky-50"
+                        className="border-sky-300 text-sky-600 hover:bg-sky-50 rounded-full h-9 w-9 p-0"
                         disabled={isExportingPPTX}
+                        title="Export"
                       >
                         {isExportingPPTX ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                            Exporting...
-                          </>
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <>
-                            <Download className="h-4 w-4 mr-1" />
-                            Export
-                          </>
+                          <Download className="h-4 w-4" />
                         )}
                       </Button>
                     </DropdownMenuTrigger>
@@ -776,18 +771,19 @@ export default function ProposalDetailPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setIsEditing(true)}
+                    className="rounded-full h-9 w-9 p-0"
+                    title="Edit"
                   >
-                    <Edit className="h-4 w-4 mr-1" />
-                    Edit
+                    <Edit className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="border-red-300 text-red-600 hover:bg-red-50"
+                    className="border-red-300 text-red-600 hover:bg-red-50 rounded-full h-9 w-9 p-0"
                     onClick={handleDelete}
+                    title="Delete"
                   >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </>
               )}
@@ -1071,15 +1067,14 @@ export default function ProposalDetailPage() {
                         
                         {/* AI Enrichment Context - Pill-shaped textbox below */}
                         <div className="flex items-center gap-2">
-                          <Textarea
+                          <Input
                             value={aiEnrichRemarks[product.id] || ''}
                             onChange={(e) => setAiEnrichRemarks(prev => ({
                               ...prev,
                               [product.id]: e.target.value
                             }))}
                             placeholder="Guide AI designs (e.g., eco-friendly, modern)"
-                            rows={1}
-                            className="flex-1 text-xs bg-white border border-purple-200 rounded-full px-4 py-1 h-7 focus:ring-2 focus:ring-purple-300 focus:border-transparent transition-all placeholder:text-gray-400 resize-none leading-tight"
+                            className="flex-1 text-xs bg-white border border-purple-200 rounded-full px-4 h-9 focus:ring-2 focus:ring-purple-300 focus:border-transparent transition-all placeholder:text-gray-400"
                           />
                           <Button
                             size="sm"
