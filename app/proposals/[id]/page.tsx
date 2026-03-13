@@ -95,6 +95,69 @@ export default function ProposalDetailPage() {
   const [regeneratingConcepts, setRegeneratingConcepts] = useState<Set<string>>(new Set());
   const [newConceptInput, setNewConceptInput] = useState<string>('');
 
+  // Helper function to strip base64 images before saving to localStorage
+  const stripBase64Images = (proposalData: Proposal): Proposal => {
+    return {
+      ...proposalData,
+      products: proposalData.products.map(product => ({
+        ...product,
+        aiEnrichment: product.aiEnrichment ? {
+          ...product.aiEnrichment,
+          design_alternatives: product.aiEnrichment.design_alternatives.map(alt => ({
+            ...alt,
+            generated_image_url: undefined // Remove base64 images to save space
+          }))
+        } : undefined
+      }))
+    };
+  };
+
+  // Save AI-generated images to a separate localStorage cache
+  const saveAIImageCache = (proposalId: string, proposalData: Proposal) => {
+    try {
+      const imageCache: Record<string, string> = {};
+      proposalData.products.forEach(product => {
+        product.aiEnrichment?.design_alternatives?.forEach((alt, idx) => {
+          if (alt.generated_image_url) {
+            imageCache[`${product.id}-${idx}`] = alt.generated_image_url;
+          }
+        });
+      });
+      if (Object.keys(imageCache).length > 0) {
+        localStorage.setItem(`ai_images_${proposalId}`, JSON.stringify(imageCache));
+      }
+    } catch (e) {
+      console.warn('Failed to save AI image cache:', e);
+    }
+  };
+
+  // Restore AI-generated images from the separate cache
+  const restoreAIImageCache = (proposalData: Proposal): Proposal => {
+    try {
+      const cachedStr = localStorage.getItem(`ai_images_${proposalData.id}`);
+      if (!cachedStr) return proposalData;
+      const imageCache: Record<string, string> = JSON.parse(cachedStr);
+      return {
+        ...proposalData,
+        products: proposalData.products.map(product => ({
+          ...product,
+          aiEnrichment: product.aiEnrichment ? {
+            ...product.aiEnrichment,
+            design_alternatives: product.aiEnrichment.design_alternatives.map((alt, idx) => {
+              const cachedImage = imageCache[`${product.id}-${idx}`];
+              return cachedImage && !alt.generated_image_url
+                ? { ...alt, generated_image_url: cachedImage }
+                : alt;
+            })
+          } : undefined
+        }))
+      };
+    } catch (e) {
+      console.warn('Failed to restore AI image cache:', e);
+      return proposalData;
+    }
+  };
+
   // Fetch product details with retry logic
   const fetchProductDetailsWithRetry = async (productId: string, platform: string, maxRetries = 3): Promise<ProductDetails | null> => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -132,7 +195,7 @@ export default function ProposalDetailPage() {
     
     // Identify products that need details
     proposal.products.forEach(product => {
-      const productId = product.source_id;
+      const productId = product.id;
       
       // Skip if already in memory
       if (productDetails.has(productId)) {
@@ -149,7 +212,7 @@ export default function ProposalDetailPage() {
         return;
       }
       
-      console.log(`Need to fetch details for ${productId}`);
+      console.log(`Need to fetch details for ${productId} (source_id: ${product.source_id})`);
       detailsToFetch.push({ productId, product });
     });
 
@@ -173,7 +236,7 @@ export default function ProposalDetailPage() {
     // Fetch all details in parallel
     const results = await Promise.all(
       detailsToFetch.map(async ({ productId, product }) => {
-        const details = await fetchProductDetailsWithRetry(productId, product.source);
+        const details = await fetchProductDetailsWithRetry(product.source_id, product.source);
         return { productId, details };
       })
     );
@@ -291,6 +354,7 @@ export default function ProposalDetailPage() {
       };
 
       setProposal(updatedProposal);
+      saveAIImageCache(proposalData.id, updatedProposal);
 
       // Also update localStorage with the new images (but keep them stripped for quota)
       const stored = localStorage.getItem('proposals');
@@ -361,6 +425,7 @@ export default function ProposalDetailPage() {
       };
 
       setProposal(updatedProposal);
+      saveAIImageCache(proposal.id, updatedProposal);
 
       // Update localStorage (keeping images stripped)
       const stored = localStorage.getItem('proposals');
@@ -373,7 +438,7 @@ export default function ProposalDetailPage() {
         }
       }
     } catch (error) {
-      console.error('Error regenerating single image:', error);
+      console.error('Error regenerating image:', error);
       alert('Failed to regenerate image. Please try again.');
     } finally {
       setRegeneratingImages(false);
@@ -440,6 +505,7 @@ export default function ProposalDetailPage() {
       };
 
       setProposal(updatedProposal);
+      saveAIImageCache(proposal.id, updatedProposal);
 
       // Update localStorage (keeping images stripped)
       const stored = localStorage.getItem('proposals');
@@ -503,6 +569,7 @@ export default function ProposalDetailPage() {
       };
 
       setProposal(updatedProposal);
+      saveAIImageCache(proposal.id, updatedProposal);
 
       // Update localStorage (keeping images stripped)
       const stored = localStorage.getItem('proposals');
@@ -586,6 +653,7 @@ export default function ProposalDetailPage() {
       };
 
       setProposal(updatedProposal);
+      saveAIImageCache(proposal.id, updatedProposal);
 
       // Update localStorage (keeping images stripped)
       const stored = localStorage.getItem('proposals');
@@ -620,26 +688,43 @@ export default function ProposalDetailPage() {
         const proposals = JSON.parse(stored);
         const found = proposals.find((p: Proposal) => p.id === params.id);
         if (found) {
-          setProposal(found);
-          setEditedName(found.name);
-          setEditedClientName(found.client_name || "");
-          setEditedNotes(found.notes || "");
-          setEditedStatus(found.status);
+          // Restore AI images from separate cache before setting proposal
+          const restoredProposal = restoreAIImageCache(found);
+          setProposal(restoredProposal);
+          setEditedName(restoredProposal.name);
+          setEditedClientName(restoredProposal.client_name || "");
+          setEditedNotes(restoredProposal.notes || "");
+          setEditedStatus(restoredProposal.status);
           
           // Load cached product details from localStorage
-          const cachedDetailsKey = `proposal_details_${found.id}`;
+          const cachedDetailsKey = `proposal_details_${restoredProposal.id}`;
           const cachedDetailsStr = localStorage.getItem(cachedDetailsKey);
           if (cachedDetailsStr) {
             try {
               const cachedDetailsObj = JSON.parse(cachedDetailsStr);
-              setProductDetails(new Map(Object.entries(cachedDetailsObj)));
+              // Remap: cache may have source_id keys or product.id keys
+              // Build a lookup from source_id -> product.id
+              const sourceIdToProductId = new Map<string, string>();
+              found.products.forEach((p: any) => {
+                sourceIdToProductId.set(p.source_id, p.id);
+                sourceIdToProductId.set(p.id, p.id); // also map id->id
+              });
+              const remappedDetails = new Map<string, ProductDetails>();
+              Object.entries(cachedDetailsObj).forEach(([key, value]) => {
+                const mappedKey = sourceIdToProductId.get(key) || key;
+                remappedDetails.set(mappedKey, value as ProductDetails);
+              });
+              setProductDetails(remappedDetails);
+              console.log(`Loaded cached details for ${remappedDetails.size} products`);
             } catch (e) {
               console.error('Error loading cached details:', e);
             }
           }
 
-          // Regenerate missing AI images
-          regenerateMissingAIImages(found);
+          // Log how many AI images were restored
+          const restoredCount = restoredProposal.products.reduce((count: number, p: any) => 
+            count + (p.aiEnrichment?.design_alternatives?.filter((alt: any) => alt.generated_image_url).length || 0), 0);
+          console.log(`Restored ${restoredCount} AI images from cache`);
         } else {
           setProposal(null);
         }
@@ -906,23 +991,6 @@ export default function ProposalDetailPage() {
     }
   };
 
-  // Helper function to strip base64 images before saving to localStorage
-  const stripBase64Images = (proposal: Proposal): Proposal => {
-    return {
-      ...proposal,
-      products: proposal.products.map(product => ({
-        ...product,
-        aiEnrichment: product.aiEnrichment ? {
-          ...product.aiEnrichment,
-          design_alternatives: product.aiEnrichment.design_alternatives.map(alt => ({
-            ...alt,
-            generated_image_url: undefined // Remove base64 images to save space
-          }))
-        } : undefined
-      }))
-    };
-  };
-
   const handleAIEnrich = async (productId: string) => {
     if (!proposal) return;
 
@@ -984,6 +1052,7 @@ export default function ProposalDetailPage() {
           localStorage.setItem('proposals', JSON.stringify(proposals));
           // Keep full data in state (with images)
           setProposal(updatedProposal);
+          saveAIImageCache(proposal.id, updatedProposal);
         }
       }
       
@@ -1005,6 +1074,9 @@ export default function ProposalDetailPage() {
   const removeProduct = (productId: string) => {
     if (!proposal) return;
 
+    const confirmed = confirm('Are you sure you want to remove this product?');
+    if (!confirmed) return;
+
     const updatedProducts = proposal.products.filter(p => p.id !== productId);
     const updatedProposal = {
       ...proposal,
@@ -1020,11 +1092,16 @@ export default function ProposalDetailPage() {
         const proposals = JSON.parse(stored);
         const index = proposals.findIndex((p: Proposal) => p.id === params.id);
         if (index !== -1) {
-          proposals[index] = updatedProposal;
+          proposals[index] = stripBase64Images(updatedProposal);
           localStorage.setItem('proposals', JSON.stringify(proposals));
-          setProposal(updatedProposal);
         }
       }
+      setProposal(updatedProposal);
+
+      // Also clean up cached details for removed product
+      const newDetails = new Map(productDetails);
+      newDetails.delete(productId);
+      setProductDetails(newDetails);
     } catch (error) {
       console.error('Error updating proposal:', error);
       alert('Failed to remove product');
@@ -1258,7 +1335,7 @@ export default function ProposalDetailPage() {
             <div>
               <p className="text-sm text-gray-600 mb-1">Details Status</p>
               {(() => {
-                const productsWithDetails = proposal.products.filter(p => p.cachedDetails);
+                const productsWithDetails = proposal.products.filter(p => productDetails.has(p.id));
                 const allHaveDetails = productsWithDetails.length === proposal.products.length;
                 return allHaveDetails ? (
                   <div className="flex items-center text-green-600">
