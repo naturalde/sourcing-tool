@@ -321,7 +321,8 @@ export default function Home() {
     
     try {
       // Get the product's main image URL
-      const imageUrl = product.image_urls[0];
+      const rawImageUrl = product.image_urls[0];
+      const imageUrl = rawImageUrl?.startsWith('//') ? `https:${rawImageUrl}` : rawImageUrl;
       if (!imageUrl) {
         alert('No image available for this product');
         return;
@@ -330,8 +331,16 @@ export default function Home() {
       setIsLoading(true);
       
       // Fetch the image and convert to File
-      const response = await fetch(imageUrl);
+      const response = await fetch(imageUrl, {
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch product image (${response.status})`);
+      }
       const blob = await response.blob();
+      if (!blob || blob.size === 0) {
+        throw new Error('Product image is empty');
+      }
       const file = new File([blob], 'product-image.jpg', { type: blob.type });
       
       // Perform image search
@@ -341,11 +350,18 @@ export default function Home() {
       const searchResponse = await fetch('/api/search-image', {
         method: 'POST',
         body: formData,
+        signal: AbortSignal.timeout(90000),
       });
       
       if (!searchResponse.ok) {
-        const errorData = await searchResponse.json();
-        throw new Error(errorData.error || 'Image search failed');
+        const errorText = await searchResponse.text();
+        let details: any = null;
+        try {
+          details = JSON.parse(errorText);
+        } catch {
+          details = null;
+        }
+        throw new Error(details?.error || details?.details || errorText || 'Image search failed');
       }
       
       const data = await searchResponse.json();
@@ -358,7 +374,7 @@ export default function Home() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error finding similar products:', error);
-      alert('Failed to find similar products. Please try again.');
+      alert(error instanceof Error ? error.message : 'Failed to find similar products. Please try again.');
     } finally {
       setFindingSimilarFor(null);
       setIsLoading(false);

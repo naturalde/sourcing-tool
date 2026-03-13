@@ -22,12 +22,27 @@ export async function POST(request: NextRequest) {
     const searchResponse = await fetch(`${taobaoServiceUrl}/search-image`, {
       method: 'POST',
       body: taobaoFormData,
+      signal: AbortSignal.timeout(90000),
     });
 
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
       console.error(`Taobao service returned ${searchResponse.status}: ${errorText}`);
-      throw new Error(`Taobao service returned ${searchResponse.status}`);
+
+      let details: any = null;
+      try {
+        details = JSON.parse(errorText);
+      } catch {
+        details = null;
+      }
+
+      return NextResponse.json(
+        {
+          error: 'Taobao image search failed',
+          details: details?.detail || details?.error || errorText || `Taobao service returned ${searchResponse.status}`,
+        },
+        { status: searchResponse.status }
+      );
     }
 
     const data = await searchResponse.json();
@@ -39,8 +54,9 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Error in image search:', error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to search by image', details: String(error) },
+      { error: 'Failed to search by image', details: message },
       { status: 500 }
     );
   }

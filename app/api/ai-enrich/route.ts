@@ -72,7 +72,7 @@ GUIDELINES
 
 export async function POST(request: NextRequest) {
   try {
-    const { imageUrl, userNotes } = await request.json();
+    const { imageUrl, userNotes, fastMode } = await request.json();
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -85,14 +85,14 @@ export async function POST(request: NextRequest) {
     const prompt = AI_ENRICHMENT_PROMPT.replace('{{user_notes}}', userNotes || 'None provided');
 
     // Call Gemini API to get concept descriptions
-    const result = await callGemini(imageUrl, prompt);
+    const result = await callGemini(imageUrl, prompt, Boolean(fastMode));
 
     // Generate images for each design alternative
     console.log('Generating images for design alternatives...');
     const enrichedAlternatives = await Promise.all(
       result.design_alternatives.map(async (alt: any) => {
         try {
-          const imageUrl = await generateImageWithImagen(alt.generated_image_prompt);
+          const imageUrl = await generateImageWithImagen(alt.generated_image_prompt, Boolean(fastMode));
           return {
             ...alt,
             generated_image_url: imageUrl
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function callGemini(imageUrl: string, prompt: string) {
+async function callGemini(imageUrl: string, prompt: string, fastMode: boolean) {
   const apiKey = process.env.GEMINI_API_KEY;
   
   if (!apiKey) {
@@ -156,10 +156,10 @@ async function callGemini(imageUrl: string, prompt: string) {
           },
         ],
         generationConfig: {
-          temperature: 0.7,
+          temperature: fastMode ? 0.5 : 0.7,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048,
+          maxOutputTokens: fastMode ? 1024 : 2048,
         },
       }),
     }
@@ -188,12 +188,16 @@ async function callGemini(imageUrl: string, prompt: string) {
   return JSON.parse(jsonMatch[0]);
 }
 
-async function generateImageWithImagen(prompt: string): Promise<string> {
+async function generateImageWithImagen(prompt: string, fastMode: boolean): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not configured');
   }
+
+  const effectivePrompt = fastMode
+    ? `${prompt}\n\nGenerate a low-resolution, fast-rendering product image (square 512x512). Keep the design simple, clean background, minimal fine detail.`
+    : prompt;
 
   console.log(`Generating image with Gemini for prompt: ${prompt.substring(0, 100)}...`);
 
@@ -207,9 +211,13 @@ async function generateImageWithImagen(prompt: string): Promise<string> {
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: prompt
+            text: effectivePrompt
           }]
-        }]
+        }],
+        generationConfig: fastMode ? {
+          temperature: 0.4,
+          maxOutputTokens: 512,
+        } : undefined,
       }),
     }
   );
@@ -241,8 +249,16 @@ async function generateImageWithImagen(prompt: string): Promise<string> {
     throw new Error('No image data in Gemini response');
   }
 
+  // Use the correct mime type if provided (Gemini may return png or jpeg)
+  const mimeType =
+    imagePart.inline_data?.mime_type ||
+    imagePart.inline_data?.mimeType ||
+    imagePart.inlineData?.mime_type ||
+    imagePart.inlineData?.mimeType ||
+    'image/png';
+
   // Return as data URL for direct display
-  return `data:image/png;base64,${imageBase64}`;
+  return `data:${mimeType};base64,${imageBase64}`;
 }
 
 async function callClaude(imageUrl: string, prompt: string) {

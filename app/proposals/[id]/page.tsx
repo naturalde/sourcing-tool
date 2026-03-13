@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -82,12 +83,17 @@ export default function ProposalDetailPage() {
   const [carouselInitialIndex, setCarouselInitialIndex] = useState(0);
   const [isCarouselOpen, setIsCarouselOpen] = useState(false);
   const [loadingAIEnrich, setLoadingAIEnrich] = useState<string | null>(null);
+  const [regeneratingImages, setRegeneratingImages] = useState(false);
+  const [isAIEnrichFastMode, setIsAIEnrichFastMode] = useState(true);
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<PPTXTemplate | null>(null);
   const [isExportingPPTX, setIsExportingPPTX] = useState(false);
   const [metadataPopupOpen, setMetadataPopupOpen] = useState<string | null>(null);
   const [aiEnrichRemarksOpen, setAiEnrichRemarksOpen] = useState<string | null>(null);
   const [aiEnrichRemarks, setAiEnrichRemarks] = useState<Record<string, string>>({});
+  const [conceptRegenerationInputs, setConceptRegenerationInputs] = useState<Record<string, string>>({});
+  const [regeneratingConcepts, setRegeneratingConcepts] = useState<Set<string>>(new Set());
+  const [newConceptInput, setNewConceptInput] = useState<string>('');
 
   // Fetch product details with retry logic
   const fetchProductDetailsWithRetry = async (productId: string, platform: string, maxRetries = 3): Promise<ProductDetails | null> => {
@@ -120,6 +126,8 @@ export default function ProposalDetailPage() {
   const fetchAllProductDetails = async () => {
     if (!proposal) return;
 
+    console.log('fetchAllProductDetails called, current loadingDetails size:', loadingDetails.size);
+
     const detailsToFetch: Array<{ productId: string; product: ProductDTO }> = [];
     
     // Identify products that need details
@@ -128,21 +136,31 @@ export default function ProposalDetailPage() {
       
       // Skip if already in memory
       if (productDetails.has(productId)) {
+        console.log(`Details for ${productId} already in memory`);
         return;
       }
       
       // Skip if has cached details
       if (product.cachedDetails) {
+        console.log(`Using cached details for ${productId}`);
         const newDetails = new Map(productDetails);
         newDetails.set(productId, product.cachedDetails);
         setProductDetails(newDetails);
         return;
       }
       
+      console.log(`Need to fetch details for ${productId}`);
       detailsToFetch.push({ productId, product });
     });
 
-    if (detailsToFetch.length === 0) return;
+    // Always clear loading state, even if no details need to be fetched
+    console.log('Clearing loading state at start');
+    setLoadingDetails(new Set());
+
+    if (detailsToFetch.length === 0) {
+      console.log('All product details are already loaded');
+      return;
+    }
 
     console.log(`Fetching details for ${detailsToFetch.length} products...`);
     
@@ -150,6 +168,7 @@ export default function ProposalDetailPage() {
     const newLoading = new Set(loadingDetails);
     detailsToFetch.forEach(({ productId }) => newLoading.add(productId));
     setLoadingDetails(newLoading);
+    console.log('Set loading state for products:', detailsToFetch.map(d => d.productId));
 
     // Fetch all details in parallel
     const results = await Promise.all(
@@ -176,6 +195,7 @@ export default function ProposalDetailPage() {
     }
 
     // Clear loading state
+    console.log('Clearing loading state after fetching');
     setLoadingDetails(new Set());
     
     console.log(`Successfully fetched details for ${results.filter(r => r.details).length}/${detailsToFetch.length} products`);
@@ -191,6 +211,407 @@ export default function ProposalDetailPage() {
       fetchAllProductDetails();
     }
   }, [proposal?.id]);
+
+  // Cleanup effect to ensure loading state is cleared
+  useEffect(() => {
+    return () => {
+      if (loadingDetails.size > 0) {
+        console.log('Cleanup: Clearing loading state');
+        setLoadingDetails(new Set());
+      }
+    };
+  }, [proposal?.id]);
+
+  const regenerateMissingAIImages = async (proposalData: Proposal) => {
+    if (!proposalData?.products) return;
+
+    const productsNeedingRegeneration = proposalData.products.filter(
+      product => product.aiEnrichment?.design_alternatives?.some(alt => !alt.generated_image_url)
+    );
+
+    if (productsNeedingRegeneration.length === 0) return;
+
+    console.log(`Regenerating AI images for ${productsNeedingRegeneration.length} products...`);
+    setRegeneratingImages(true);
+
+    try {
+      const updatedProducts = await Promise.all(
+        productsNeedingRegeneration.map(async (product) => {
+          if (!product.aiEnrichment?.design_alternatives) return product;
+
+          const regeneratedAlternatives = await Promise.all(
+            product.aiEnrichment.design_alternatives.map(async (alt) => {
+              if (alt.generated_image_url) return alt;
+
+              try {
+                // Regenerate the image using the stored prompt
+                const response = await fetch('/api/ai-enrich/generate-image', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: alt.generated_image_prompt,
+                    fastMode: isAIEnrichFastMode,
+                  }),
+                });
+
+                if (!response.ok) {
+                  throw new Error(`Failed to regenerate image: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                return {
+                  ...alt,
+                  generated_image_url: result.dataUrl,
+                };
+              } catch (error) {
+                console.error('Failed to regenerate image for alternative:', alt.concept_title, error);
+                return alt; // Return original if regeneration fails
+              }
+            })
+          );
+
+          return {
+            ...product,
+            aiEnrichment: {
+              ...product.aiEnrichment,
+              design_alternatives: regeneratedAlternatives,
+            },
+          };
+        })
+      );
+
+      // Update the proposal with regenerated images
+      const updatedProposal = {
+        ...proposalData,
+        products: proposalData.products.map(p => {
+          const updated = updatedProducts.find(up => up.id === p.id);
+          return updated || p;
+        }),
+      };
+
+      setProposal(updatedProposal);
+
+      // Also update localStorage with the new images (but keep them stripped for quota)
+      const stored = localStorage.getItem('proposals');
+      if (stored) {
+        const proposals = JSON.parse(stored);
+        const index = proposals.findIndex((p: Proposal) => p.id === proposalData.id);
+        if (index !== -1) {
+          proposals[index] = stripBase64Images(updatedProposal);
+          localStorage.setItem('proposals', JSON.stringify(proposals));
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating AI images:', error);
+    } finally {
+      setRegeneratingImages(false);
+    }
+  };
+
+  const regenerateSingleImage = async (productId: string, alternativeIndex: number) => {
+    if (!proposal) return;
+
+    const product = proposal.products.find(p => p.id === productId);
+    if (!product?.aiEnrichment?.design_alternatives[alternativeIndex]) return;
+
+    const alternative = product.aiEnrichment.design_alternatives[alternativeIndex];
+    
+    try {
+      setRegeneratingImages(true);
+      
+      const response = await fetch('/api/ai-enrich/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: alternative.generated_image_prompt,
+          fastMode: isAIEnrichFastMode,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to regenerate image: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      // Update the specific alternative with the new image
+      const updatedAlternatives = [...product.aiEnrichment.design_alternatives];
+      updatedAlternatives[alternativeIndex] = {
+        ...alternative,
+        generated_image_url: result.dataUrl,
+      };
+
+      // Update the proposal
+      const updatedProducts = proposal.products.map(p => 
+        p.id === productId 
+          ? {
+              ...p,
+              aiEnrichment: {
+                ...p.aiEnrichment!,
+                design_alternatives: updatedAlternatives,
+              },
+            }
+          : p
+      );
+
+      const updatedProposal = {
+        ...proposal,
+        products: updatedProducts,
+      };
+
+      setProposal(updatedProposal);
+
+      // Update localStorage (keeping images stripped)
+      const stored = localStorage.getItem('proposals');
+      if (stored) {
+        const proposals = JSON.parse(stored);
+        const index = proposals.findIndex((p: Proposal) => p.id === proposal.id);
+        if (index !== -1) {
+          proposals[index] = stripBase64Images(updatedProposal);
+          localStorage.setItem('proposals', JSON.stringify(proposals));
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating single image:', error);
+      alert('Failed to regenerate image. Please try again.');
+    } finally {
+      setRegeneratingImages(false);
+    }
+  };
+
+  const regenerateConcept = async (productId: string, alternativeIndex: number) => {
+    if (!proposal) return;
+
+    const product = proposal.products.find(p => p.id === productId);
+    if (!product?.aiEnrichment?.design_alternatives[alternativeIndex]) return;
+
+    const conceptKey = `${productId}-${alternativeIndex}`;
+    const userInput = conceptRegenerationInputs[conceptKey] || '';
+    const alternative = product.aiEnrichment.design_alternatives[alternativeIndex];
+    
+    try {
+      setRegeneratingConcepts(prev => new Set(prev).add(conceptKey));
+      
+      // Create enhanced prompt with user input
+      const enhancedPrompt = userInput 
+        ? `${alternative.generated_image_prompt}\n\nUser feedback for this iteration: ${userInput}\n\nPlease incorporate this feedback while maintaining the core concept.`
+        : alternative.generated_image_prompt;
+
+      const response = await fetch('/api/ai-enrich/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: enhancedPrompt,
+          fastMode: isAIEnrichFastMode,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to regenerate concept: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      // Update the specific alternative with the new image and potentially updated prompt
+      const updatedAlternatives = [...product.aiEnrichment.design_alternatives];
+      updatedAlternatives[alternativeIndex] = {
+        ...alternative,
+        generated_image_url: result.dataUrl,
+        generated_image_prompt: enhancedPrompt, // Update prompt to reflect user input
+      };
+
+      // Update the proposal
+      const updatedProducts = proposal.products.map(p => 
+        p.id === productId 
+          ? {
+              ...p,
+              aiEnrichment: {
+                ...p.aiEnrichment!,
+                design_alternatives: updatedAlternatives,
+              },
+            }
+          : p
+      );
+
+      const updatedProposal = {
+        ...proposal,
+        products: updatedProducts,
+      };
+
+      setProposal(updatedProposal);
+
+      // Update localStorage (keeping images stripped)
+      const stored = localStorage.getItem('proposals');
+      if (stored) {
+        const proposals = JSON.parse(stored);
+        const index = proposals.findIndex((p: Proposal) => p.id === proposal.id);
+        if (index !== -1) {
+          proposals[index] = stripBase64Images(updatedProposal);
+          localStorage.setItem('proposals', JSON.stringify(proposals));
+        }
+      }
+
+      // Clear the input after successful regeneration
+      setConceptRegenerationInputs(prev => {
+        const newInputs = { ...prev };
+        delete newInputs[conceptKey];
+        return newInputs;
+      });
+
+    } catch (error) {
+      console.error('Error regenerating concept:', error);
+      alert('Failed to regenerate concept. Please try again.');
+    } finally {
+      setRegeneratingConcepts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(conceptKey);
+        return newSet;
+      });
+    }
+  };
+
+  const discardConcept = async (productId: string, alternativeIndex: number) => {
+    if (!proposal) return;
+
+    const product = proposal.products.find(p => p.id === productId);
+    if (!product?.aiEnrichment?.design_alternatives) return;
+
+    const confirmed = confirm(`Are you sure you want to discard Concept ${alternativeIndex + 1}? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      // Remove the concept from the alternatives array
+      const updatedAlternatives = product.aiEnrichment.design_alternatives.filter((_, index) => index !== alternativeIndex);
+
+      // Update the proposal
+      const updatedProducts = proposal.products.map(p => 
+        p.id === productId 
+          ? {
+              ...p,
+              aiEnrichment: updatedAlternatives.length > 0 ? {
+                ...p.aiEnrichment!,
+                design_alternatives: updatedAlternatives,
+              } : undefined // Remove AI enrichment entirely if no concepts left
+            }
+          : p
+      );
+
+      const updatedProposal = {
+        ...proposal,
+        products: updatedProducts,
+      };
+
+      setProposal(updatedProposal);
+
+      // Update localStorage (keeping images stripped)
+      const stored = localStorage.getItem('proposals');
+      if (stored) {
+        const proposals = JSON.parse(stored);
+        const index = proposals.findIndex((p: Proposal) => p.id === proposal.id);
+        if (index !== -1) {
+          proposals[index] = stripBase64Images(updatedProposal);
+          localStorage.setItem('proposals', JSON.stringify(proposals));
+        }
+      }
+
+      // Clean up any regeneration inputs for this concept
+      setConceptRegenerationInputs(prev => {
+        const newInputs = { ...prev };
+        delete newInputs[`${productId}-${alternativeIndex}`];
+        return newInputs;
+      });
+
+    } catch (error) {
+      console.error('Error discarding concept:', error);
+      alert('Failed to discard concept. Please try again.');
+    }
+  };
+
+  const addNewConcept = async (productId: string) => {
+    if (!proposal || !newConceptInput.trim()) return;
+
+    const product = proposal.products.find(p => p.id === productId);
+    if (!product?.aiEnrichment) return;
+
+    try {
+      setRegeneratingConcepts(prev => new Set(prev).add(`new-${productId}`));
+
+      // Create a new concept based on user input
+      const response = await fetch('/api/ai-enrich/generate-concept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalProduct: product.aiEnrichment.original_product,
+          userPrompt: newConceptInput,
+          existingConcepts: product.aiEnrichment.design_alternatives.map(alt => alt.concept_title),
+          fastMode: isAIEnrichFastMode,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to generate concept: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      // Add the new concept to the alternatives array
+      const updatedAlternatives = [
+        ...product.aiEnrichment.design_alternatives,
+        {
+          concept_title: result.concept_title,
+          generated_image_prompt: result.generated_image_prompt,
+          short_description: result.short_description,
+          design_rationale: result.design_rationale,
+          generated_image_url: result.generated_image_url,
+        }
+      ];
+
+      // Update the proposal
+      const updatedProducts = proposal.products.map(p => 
+        p.id === productId 
+          ? {
+              ...p,
+              aiEnrichment: {
+                ...p.aiEnrichment!,
+                design_alternatives: updatedAlternatives,
+              },
+            }
+          : p
+      );
+
+      const updatedProposal = {
+        ...proposal,
+        products: updatedProducts,
+      };
+
+      setProposal(updatedProposal);
+
+      // Update localStorage (keeping images stripped)
+      const stored = localStorage.getItem('proposals');
+      if (stored) {
+        const proposals = JSON.parse(stored);
+        const index = proposals.findIndex((p: Proposal) => p.id === proposal.id);
+        if (index !== -1) {
+          proposals[index] = stripBase64Images(updatedProposal);
+          localStorage.setItem('proposals', JSON.stringify(proposals));
+        }
+      }
+
+      // Clear the input
+      setNewConceptInput('');
+
+    } catch (error) {
+      console.error('Error adding new concept:', error);
+      alert('Failed to generate new concept. Please try again.');
+    } finally {
+      setRegeneratingConcepts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(`new-${productId}`);
+        return newSet;
+      });
+    }
+  };
 
   const loadProposal = () => {
     try {
@@ -216,6 +637,9 @@ export default function ProposalDetailPage() {
               console.error('Error loading cached details:', e);
             }
           }
+
+          // Regenerate missing AI images
+          regenerateMissingAIImages(found);
         } else {
           setProposal(null);
         }
@@ -401,6 +825,10 @@ export default function ProposalDetailPage() {
         const newDetails = new Map(productDetails);
         newDetails.set(productId, product.cachedDetails);
         setProductDetails(newDetails);
+        // Clear any loading state for this product
+        const newLoading = new Set(loadingDetails);
+        newLoading.delete(productId);
+        setLoadingDetails(newLoading);
         return;
       }
 
@@ -408,6 +836,7 @@ export default function ProposalDetailPage() {
       const newLoading = new Set(loadingDetails);
       newLoading.add(productId);
       setLoadingDetails(newLoading);
+      console.log(`Starting to fetch details for ${productId}`);
 
       try {
         const response = await fetch(`/api/product-details?productId=${productId}&platform=${product.source}`);
@@ -420,12 +849,22 @@ export default function ProposalDetailPage() {
         const newDetails = new Map(productDetails);
         newDetails.set(productId, details);
         setProductDetails(newDetails);
+        console.log(`Successfully fetched details for ${productId}`);
       } catch (error) {
         console.error('Error fetching product details:', error);
       } finally {
         const newLoading = new Set(loadingDetails);
         newLoading.delete(productId);
         setLoadingDetails(newLoading);
+        console.log(`Cleared loading state for ${productId}`);
+      }
+    } else {
+      // Details are already in memory, ensure loading state is cleared
+      const newLoading = new Set(loadingDetails);
+      newLoading.delete(productId);
+      if (newLoading.size !== loadingDetails.size) {
+        setLoadingDetails(newLoading);
+        console.log(`Cleared loading state for already loaded ${productId}`);
       }
     }
   };
@@ -506,6 +945,7 @@ export default function ProposalDetailPage() {
         body: JSON.stringify({
           imageUrl: product.image_urls[0],
           userNotes: userRemarks,
+          fastMode: isAIEnrichFastMode,
         }),
       });
 
@@ -863,6 +1303,31 @@ export default function ProposalDetailPage() {
           </div>
         </div>
 
+        {/* Global AI Settings */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-900 mb-1">AI Generation Settings</h3>
+              <p className="text-sm text-gray-600">Configure AI behavior for all products in this proposal</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">Low-res/fast</span>
+                <Switch
+                  checked={isAIEnrichFastMode}
+                  onCheckedChange={setIsAIEnrichFastMode}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 text-xs text-gray-500">
+            {isAIEnrichFastMode 
+              ? "Fast mode: Lower resolution images (512x512) for quicker generation"
+              : "High quality: Higher resolution images for better detail"
+            }
+          </div>
+        </div>
+
         {/* Products List */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b bg-gray-50">
@@ -1129,6 +1594,12 @@ export default function ProposalDetailPage() {
                                     <Badge variant="outline" className="text-purple-600 border-purple-600">
                                       Generated {new Date(product.aiEnrichment.enriched_at).toLocaleDateString()}
                                     </Badge>
+                                    {regeneratingImages && (
+                                      <div className="flex items-center gap-2 text-sm text-amber-600">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Regenerating images...</span>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Original Product Analysis */}
@@ -1176,46 +1647,145 @@ export default function ProposalDetailPage() {
                                   </div>
 
                                   {/* Design Alternatives */}
-                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
                                     {product.aiEnrichment.design_alternatives.map((alt, idx) => (
                                       <div key={idx} className="bg-white rounded-lg border border-gray-200 hover:border-purple-300 transition-colors overflow-hidden">
                                         <div className="flex items-start gap-2 p-3 bg-gray-50 border-b border-gray-200">
-                                          <Badge variant="secondary" className="text-xs">
+                                          <div className={`px-2 py-1 rounded-full text-xs font-medium text-white shadow-lg ${
+                                            idx === 0 ? 'bg-gradient-to-r from-purple-500 to-pink-500 shadow-purple-500/50' :
+                                            idx === 1 ? 'bg-gradient-to-r from-blue-500 to-cyan-500 shadow-blue-500/50' :
+                                            'bg-gradient-to-r from-green-500 to-emerald-500 shadow-green-500/50'
+                                          }`}>
                                             Concept {idx + 1}
-                                          </Badge>
-                                          <h6 className="font-semibold text-gray-900 flex-1">{alt.concept_title}</h6>
+                                          </div>
+                                          <h6 className="font-semibold text-gray-900 flex-1 text-sm truncate">{alt.concept_title}</h6>
                                         </div>
                                         
                                         {/* Concept Image Visualization */}
-                                        <div className="relative bg-gradient-to-br from-purple-50 to-sky-50 aspect-square">
+                                        <div className="relative bg-gradient-to-br from-purple-50 to-sky-50 w-64 h-64 flex items-center justify-center">
                                           {alt.generated_image_url ? (
                                             <img 
                                               src={alt.generated_image_url} 
                                               alt={alt.concept_title}
-                                              className="w-full h-full object-cover"
+                                              className="max-w-full max-h-full object-contain mx-auto"
                                             />
                                           ) : (
                                             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
                                               <svg className="h-12 w-12 text-purple-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                               </svg>
-                                              <p className="text-xs text-gray-600 italic leading-relaxed">
+                                              <p className="text-xs text-gray-600 italic leading-relaxed mb-3 line-clamp-3">
                                                 {alt.generated_image_prompt}
                                               </p>
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => regenerateSingleImage(product.id, idx)}
+                                                disabled={regeneratingImages}
+                                                className="text-xs h-8 px-3"
+                                              >
+                                                <Loader2 className={`h-3 w-3 mr-1 ${regeneratingImages ? 'animate-spin' : ''}`} />
+                                                Generate
+                                              </Button>
                                             </div>
                                           )}
                                         </div>
 
+                                        {/* Concept Regeneration Controls */}
                                         <div className="p-4 space-y-3">
-                                          <p className="text-sm text-gray-700">{alt.short_description}</p>
+                                          <p className="text-sm text-gray-700 line-clamp-2">{alt.short_description}</p>
                                           
                                           <div className="border-t border-gray-100 pt-3">
                                             <p className="text-xs font-medium text-gray-500 mb-1">Design Rationale:</p>
-                                            <p className="text-xs text-gray-700 leading-relaxed">{alt.design_rationale}</p>
+                                            <p className="text-xs text-gray-700 leading-relaxed line-clamp-3">{alt.design_rationale}</p>
+                                          </div>
+
+                                          {/* Regeneration Section */}
+                                          <div className="border-t border-gray-100 pt-3">
+                                            <p className="text-xs font-medium text-gray-500 mb-2">Refine:</p>
+                                            <div className="space-y-2">
+                                              <Textarea
+                                                placeholder="Describe changes..."
+                                                value={conceptRegenerationInputs[`${product.id}-${idx}`] || ''}
+                                                onChange={(e) => setConceptRegenerationInputs(prev => ({
+                                                  ...prev,
+                                                  [`${product.id}-${idx}`]: e.target.value
+                                                }))}
+                                                className="text-xs resize-none h-16 p-2"
+                                                rows={2}
+                                              />
+                                              <div className="flex gap-2">
+                                                <Button
+                                                  size="sm"
+                                                  onClick={() => regenerateConcept(product.id, idx)}
+                                                  disabled={regeneratingConcepts.has(`${product.id}-${idx}`)}
+                                                  className="flex-1 text-xs h-9"
+                                                  variant="outline"
+                                                >
+                                                  <Loader2 className={`h-3 w-3 mr-1 ${regeneratingConcepts.has(`${product.id}-${idx}`) ? 'animate-spin' : ''}`} />
+                                                  {regeneratingConcepts.has(`${product.id}-${idx}`) ? 'Regenerating...' : 'Regenerate'}
+                                                </Button>
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  onClick={() => discardConcept(product.id, idx)}
+                                                  className="h-9 px-3 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                                  title="Discard concept"
+                                                >
+                                                  <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            </div>
                                           </div>
                                         </div>
                                       </div>
                                     ))}
+                                    
+                                    {/* Empty Concept Card for Adding New Concepts */}
+                                    <div className="bg-white rounded-lg border-2 border-dashed border-gray-300 hover:border-purple-400 transition-colors overflow-hidden">
+                                      <div className="flex items-start gap-2 p-3 bg-gray-50 border-b border-gray-200">
+                                        <div className="px-2 py-1 rounded-full text-xs font-medium text-gray-600 bg-gray-200">
+                                          + New
+                                        </div>
+                                        <h6 className="font-semibold text-gray-700 flex-1 text-sm">Refine AI</h6>
+                                      </div>
+                                      
+                                      {/* Empty Concept Visualization */}
+                                      <div className="relative bg-gradient-to-br from-gray-50 to-gray-100 w-64 h-64 flex items-center justify-center">
+                                        <div className="text-center">
+                                          <svg className="h-16 w-16 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                                          </svg>
+                                          <p className="text-sm text-gray-600 mb-4">Add a new concept</p>
+                                        </div>
+                                      </div>
+
+                                      {/* New Concept Controls */}
+                                      <div className="p-4 space-y-3">
+                                        <p className="text-sm text-gray-600">Describe your new concept idea</p>
+                                        
+                                        <div className="border-t border-gray-100 pt-3">
+                                          <div className="space-y-2">
+                                            <Textarea
+                                              placeholder="e.g., 'Make it eco-friendly with bamboo materials', 'Add minimalist Nordic design', 'Create a luxury gold version'"
+                                              value={newConceptInput}
+                                              onChange={(e) => setNewConceptInput(e.target.value)}
+                                              className="text-xs resize-none h-20 p-2"
+                                              rows={3}
+                                            />
+                                            <Button
+                                              size="sm"
+                                              onClick={() => addNewConcept(product.id)}
+                                              disabled={!newConceptInput.trim() || regeneratingConcepts.has(`new-${product.id}`)}
+                                              className="w-full text-xs h-9 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white"
+                                            >
+                                              <Loader2 className={`h-3 w-3 mr-1 ${regeneratingConcepts.has(`new-${product.id}`) ? 'animate-spin' : ''}`} />
+                                              {regeneratingConcepts.has(`new-${product.id}`) ? 'Generating...' : 'Generate Concept'}
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
                                   </div>
                                 </>
                               )}

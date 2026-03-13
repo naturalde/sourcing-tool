@@ -328,21 +328,18 @@ export default function ProposalsPage() {
           <h1 className="text-3xl font-bold text-gray-900">
             Proposals
           </h1>
-          <Button 
-            onClick={() => {
-              setShowCreateForm(true);
-              setUserDismissedForm(false);
-            }}
-            className="bg-sky-500 hover:bg-sky-600 text-white relative"
-          >
-            <Plus className="h-5 w-5 mr-2" />
-            New Proposal
-            {proposalProducts.length > 0 && (
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center">
-                {proposalProducts.length}
-              </span>
-            )}
-          </Button>
+          {proposalProducts.length === 0 && (
+            <Button 
+              onClick={() => {
+                setShowCreateForm(true);
+                setUserDismissedForm(false);
+              }}
+              className="bg-sky-500 hover:bg-sky-600 text-white"
+            >
+              <Plus className="h-5 w-5 mr-2" />
+              New Proposal
+            </Button>
+          )}
         </div>
 
         {/* Pending Products Alert */}
@@ -360,14 +357,20 @@ export default function ProposalsPage() {
                   </p>
                 </div>
               </div>
-              <Button
+              <Button 
                 onClick={() => {
                   setShowCreateForm(true);
                   setUserDismissedForm(false);
                 }}
-                className="bg-sky-600 hover:bg-sky-700 text-white"
+                className="bg-sky-600 hover:bg-sky-700 text-white relative"
               >
-                Create Proposal
+                <Plus className="h-5 w-5 mr-2" />
+                New Proposal
+                {proposalProducts.length > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center">
+                    {proposalProducts.length}
+                  </span>
+                )}
               </Button>
             </div>
           </div>
