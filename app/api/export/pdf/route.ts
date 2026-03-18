@@ -211,17 +211,20 @@ export async function POST(request: NextRequest) {
       
       // Item number in top left
       doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('calibri', 'bold');
       doc.text(itemNumber, margin, margin + 5);
       
-      // Left half: Images
-      const leftHalfWidth = (pageWidth - 3 * margin) / 2;
-      const imageStartY = margin + 15;
-      const imageHeight = 60;
+      // Left section: Images (convert PPTX coordinates to PDF mm)
+      // PPTX uses inches, PDF uses mm. Convert: 1 inch = 25.4mm
+      // PPTX coordinates: 0.3, 1.2, 3.5, 1.1, 0.15, 5.2, 7.5
+      // Convert to mm: multiply by 25.4
+      const imageStartX = 0.3 * 25.4; // ~7.6mm
+      const imageStartY = 1.2 * 25.4; // ~30.5mm  
+      const mainImageSize = 3.5 * 25.4 * 0.95; // Enlarge by 10% (from 0.85 to 0.95, ~83.3mm)
       
       // Main image
       if (product.image_urls && product.image_urls.length > 0) {
-        await addImageToPDF(doc, product.image_urls[0], margin, imageStartY, leftHalfWidth, imageHeight);
+        await addImageToPDF(doc, product.image_urls[0], imageStartX, imageStartY, mainImageSize, mainImageSize);
         
         // Use selected secondary images if available, otherwise use cachedDetails
         const selectedImages = product.selectedSecondaryImages || [];
@@ -232,8 +235,12 @@ export async function POST(request: NextRequest) {
         if (additionalImages.length > 0) {
           // Take up to 4 additional images
           const imagesToShow = additionalImages.slice(0, 4);
-          const smallImageSize = leftHalfWidth / 4; // 1/4 of main image width
-          const additionalImagesY = imageStartY + imageHeight + 5;
+          
+          // Layout like PPTX: vertical alignment to the right of main image
+          const smallImageSize = 1.1 * 25.4 * 0.95; // Enlarge by 10% (from 0.85 to 0.95, ~26.5mm)
+          const imageSpacing = 0.15 * 25.4; // ~3.8mm
+          const smallImageX = imageStartX + mainImageSize + 0.2 * 25.4; // ~5.1mm from main image
+          const smallImageStartY = imageStartY;
           
           // Normalize URLs
           const imageUrls = imagesToShow.map((img: { url: string }) => {
@@ -244,10 +251,9 @@ export async function POST(request: NextRequest) {
           // Fetch all images in parallel
           const imageResults = await fetchImagesInParallel(imageUrls);
           
-          // Add images to PDF
+          // Add images vertically to the right of main image
           for (let i = 0; i < imagesToShow.length; i++) {
-            const col = i % 4;
-            const xPos = margin + col * smallImageSize;
+            const yPos = smallImageStartY + i * (smallImageSize + imageSpacing);
             const imageUrl = imageUrls[i];
             const base64Image = imageResults.get(imageUrl);
             
@@ -262,96 +268,89 @@ export async function POST(request: NextRequest) {
                 );
                 
                 // Center the image within the available space
-                const xOffset = xPos + (smallImageSize - width) / 2;
-                const yOffset = additionalImagesY + (smallImageSize - height) / 2;
+                const xOffset = smallImageX + (smallImageSize - width) / 2;
+                const yOffset = yPos + (smallImageSize - height) / 2;
                 
                 doc.addImage(base64Image, 'JPEG', xOffset, yOffset, width, height);
               } catch (imgError) {
                 console.error(`Error adding cached image to PDF:`, imgError);
                 // Fallback to placeholder
                 doc.setFillColor(240, 240, 240);
-                doc.rect(xPos, additionalImagesY, smallImageSize, smallImageSize, 'F');
+                doc.rect(smallImageX, yPos, smallImageSize, smallImageSize, 'F');
                 doc.setFontSize(8);
                 doc.setTextColor(150, 150, 150);
-                doc.text('Image', xPos + smallImageSize / 2, additionalImagesY + smallImageSize / 2, { align: 'center' });
+                doc.text('Image', smallImageX + smallImageSize / 2, yPos + smallImageSize / 2, { align: 'center' });
               }
             } else {
               // Fallback to placeholder if image not available
               doc.setFillColor(240, 240, 240);
-              doc.rect(xPos, additionalImagesY, smallImageSize, smallImageSize, 'F');
+              doc.rect(smallImageX, yPos, smallImageSize, smallImageSize, 'F');
               doc.setFontSize(8);
               doc.setTextColor(150, 150, 150);
-              doc.text('Image', xPos + smallImageSize / 2, additionalImagesY + smallImageSize / 2, { align: 'center' });
+              doc.text('Image', smallImageX + smallImageSize / 2, yPos + smallImageSize / 2, { align: 'center' });
             }
           }
         }
       }
       
-      // Right half: Details
-      const rightHalfX = margin + leftHalfWidth + margin;
-      const rightHalfWidth = leftHalfWidth;
-      let currentY = imageStartY;
+      // Right section: Details (convert PPTX coordinates to PDF mm, move left)
+      const rightSectionX = (5.2 * 25.4) - (mainImageSize * 0.05); // Move left by 5% of image size
+      const rightSectionWidth = 7.5 * 25.4 * 0.8; // Shorten by 20% (~152.4mm)
+      let currentY = 1.2 * 25.4; // ~30.5mm
       
       // Product title
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      const titleLines = doc.splitTextToSize(product.title, rightHalfWidth);
-      doc.text(titleLines, rightHalfX, currentY);
-      currentY += titleLines.length * 6 + 5;
+      doc.setFontSize(12); // Changed from 16 to 12
+      doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
+      const titleLines = doc.splitTextToSize(product.title, rightSectionWidth);
+      doc.text(titleLines, rightSectionX, currentY);
+      currentY += 0.8 * 25.4; // Same as PPTX (0.8 inches)
       
       // Price
-      doc.setFontSize(16);
+      doc.setFontSize(12); // Changed from 16 to 12
+      doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
       doc.setTextColor(14, 165, 233);
-      doc.text(`${product.price.current} ${product.price.currency}`, rightHalfX, currentY);
-      currentY += 10;
+      doc.text(`${product.price.current} ${product.price.currency}`, rightSectionX, currentY);
+      currentY += 0.4 * 25.4; // Same as PPTX (0.4 inches)
       
       doc.setTextColor(0, 0, 0);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10); // Same as PPTX
+      doc.setFont('calibri', 'normal'); // Changed from helvetica to calibri
       
-      // Pricing Details
-      const pricingDetails = [
-        ['Platform:', product.source],
-        ['FOB Price:', product.fob ? `${product.fob} ${product.price.currency}` : 'N/A'],
-        ['ELC:', product.elc ? `${product.elc} ${product.price.currency}` : 'N/A'],
-      ];
+      // Pricing Information - match PPTX simple text layout
+      doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
+      doc.text('Pricing Information', rightSectionX, currentY);
+      currentY += 0.25 * 25.4; // Same as PPTX (0.25 inches)
+      doc.setFont('calibri', 'normal'); // Changed from helvetica to calibri
       
-      doc.setFont('helvetica', 'bold');
-      doc.text('Pricing Information', rightHalfX, currentY);
-      currentY += 6;
-      doc.setFont('helvetica', 'normal');
+      // Platform
+      doc.text(`Platform: ${product.source}`, rightSectionX, currentY);
+      currentY += 0.15 * 25.4; // Same as PPTX (0.15 inches)
       
-      pricingDetails.forEach(([label, value]) => {
-        doc.setFont('helvetica', 'bold');
-        doc.text(label, rightHalfX, currentY);
-        doc.setFont('helvetica', 'normal');
-        doc.text(String(value), rightHalfX + 35, currentY);
-        currentY += 5;
-      });
+      // FOB Price
+      doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
+      doc.text('FOB Price:', rightSectionX, currentY);
+      doc.setFont('calibri', 'normal'); // Changed from helvetica to calibri
+      doc.text(product.fob ? `${product.fob} ${product.price.currency}` : 'N/A', rightSectionX + 35, currentY);
+      currentY += 0.15 * 25.4; // Same as PPTX (0.15 inches)
       
-      currentY += 3;
+      // ELC
+      doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
+      doc.text('ELC:', rightSectionX, currentY);
+      doc.setFont('calibri', 'normal'); // Changed from helvetica to calibri
+      doc.text(product.elc ? `${product.elc} ${product.price.currency}` : 'N/A', rightSectionX + 35, currentY);
+      currentY += 0.15 * 25.4; // Same as PPTX (0.15 inches)
       
-      // Image count
-      if (product.image_urls && product.image_urls.length > 0) {
-        doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        doc.text(`${product.image_urls.length} product images available`, rightHalfX, currentY);
-        currentY += 5;
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(10);
-      }
-      
-      // Description (if available from cached details or product)
+      // Description - use fresh details, cached details, or product fields
       const description = product.cachedDetails?.desc_short || product.description_short || product.description;
-      if (description && currentY < pageHeight - 30) {
-        doc.setFont('helvetica', 'bold');
-        doc.text('Description:', rightHalfX, currentY);
-        currentY += 6;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        const descLines = doc.splitTextToSize(description, rightHalfWidth);
+      if (description) {
+        doc.setFont('calibri', 'bold'); // Changed from helvetica to calibri
+        doc.text('Description:', rightSectionX, currentY);
+        currentY += 0.3 * 25.4; // Same as PPTX (0.3 inches)
+        doc.setFont('calibri', 'normal'); // Changed from helvetica to calibri
+        doc.setFontSize(10); // Changed from 12 to 10
+        const descLines = doc.splitTextToSize(description, rightSectionWidth);
         const maxLines = Math.floor((pageHeight - currentY - 20) / 4);
-        doc.text(descLines.slice(0, maxLines), rightHalfX, currentY);
+        doc.text(descLines.slice(0, maxLines), rightSectionX, currentY);
       }
       
       // Footer with page number (bottom of page)

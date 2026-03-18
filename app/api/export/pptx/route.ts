@@ -317,8 +317,8 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        // Take up to 3 additional images (skip first one as it's used as main image)
-        const additionalImages = allImages.slice(0, 3);
+        // Take up to 4 additional images (skip first one as it's used as main image)
+        const additionalImages = allImages.slice(0, 4);
         console.log(`Will add ${additionalImages.length} additional images for ${product.source_id}`);
         
         if (additionalImages.length > 0) {
@@ -417,11 +417,27 @@ export async function POST(request: NextRequest) {
       });
       currentY += 0.8;
       
+      // Price
+      slide.addText(`${product.price.current} ${product.price.currency}`, {
+        x: rightSectionX,
+        y: currentY,
+        w: rightSectionWidth,
+        h: 0.4,
+        fontSize: 16,
+        color: '0ea5e9',
+        bold: true
+      });
+      currentY += 0.4;
+      
       // Pricing Information
       const pricingData: any[] = [
         [
           { text: 'Pricing Information', options: { bold: true, fontSize: 11, color: '1e293b' } },
           { text: '', options: {} }
+        ],
+        [
+          { text: 'Platform:', options: { bold: true } },
+          { text: product.source, options: {} }
         ],
         [
           { text: 'FOB Price:', options: { bold: true } },
