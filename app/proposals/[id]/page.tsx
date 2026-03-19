@@ -414,7 +414,7 @@ export default function ProposalDetailPage() {
     const currentSelection = selectedSecondaryImages[productId] || [];
     const newSelection = currentSelection.includes(imageUrl)
       ? currentSelection.filter(url => url !== imageUrl)
-      : [...currentSelection, imageUrl].slice(0, 3); // Max 3 images
+      : [...currentSelection, imageUrl].slice(0, 4); // Max 4 images
     
     setSelectedSecondaryImages(prev => ({
       ...prev,
@@ -983,7 +983,7 @@ export default function ProposalDetailPage() {
                           
                           {/* Secondary Images with Checkboxes */}
                           <div className="space-y-2">
-                            <h5 className="text-sm font-medium text-gray-700 mb-2">Select up to 3 secondary photos for export:</h5>
+                            <h5 className="text-sm font-medium text-gray-700 mb-2">Select up to 4 secondary photos for export:</h5>
                             {details?.item_imgs && details.item_imgs.length > 0 && (
                               <div className="flex gap-2 overflow-x-auto">
                                 {details.item_imgs.slice(0, 6).map((img, idx) => {
